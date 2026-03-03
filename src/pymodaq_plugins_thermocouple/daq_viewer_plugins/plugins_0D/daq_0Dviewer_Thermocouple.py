@@ -6,21 +6,12 @@ from pymodaq_gui.parameter import Parameter
 
 from pymodaq.control_modules.viewer_utility_classes import DAQ_Viewer_base, comon_parameters, main
 from pymodaq.utils.data import DataFromPlugins
+from pymodaq_plugins_lakeshore.utils import Config
+config = Config()
 
-#  TODO:
-#  Replace the following fake import with the import of the real Python wrapper of your instrument. Here we suppose that
-#  the wrapper is in the hardware directory, but it could come from an external librairy like pylablib or pymeasure.
-from pymodaq_plugins_template.hardware.python_wrapper_file_of_your_instrument import PythonWrapperObjectOfYourInstrument
+from pymodaq_plugins_thermocouple.hardware.thermocouple import ThermocoupleController
 
-# TODO:
-# (1) change the name of the following class to DAQ_0DViewer_TheNameOfYourChoice
-# (2) change the name of this file to daq_0Dviewer_TheNameOfYourChoice ("TheNameOfYourChoice" should be the SAME
-#     for the class name and the file name.)
-# (3) this file should then be put into the right folder, namely IN THE FOLDER OF THE PLUGIN YOU ARE DEVELOPING:
-#     pymodaq_plugins_my_plugin/daq_viewer_plugins/plugins_0D
-
-
-class DAQ_0DViewer_Template(DAQ_Viewer_base):
+class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
     """ Instrument plugin class for a OD viewer.
     
     This object inherits all functionalities to communicate with PyMoDAQ’s DAQ_Viewer module through inheritance via
@@ -43,17 +34,21 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
 
     """
     params = comon_parameters+[
+        {'title': 'COM', 'name':  'com_port', 'type': 'list', 'limits': config['com_ports'], 'value':config['com_ports'][0]},
+        {'title': 'Refresh time', 'name':  'refresh_time', 'type': 'int', 'value':1000,'suffix':'ms'},
+        {'title': 'Thermocouples', 'name':  'thermocouple', 'type': 'group', 'children':[]},
         ## TODO for your custom plugin: elements to be added here as dicts in order to control your custom stage
         ]
 
     def ini_attributes(self):
         #  TODO declare the type of the wrapper (and assign it to self.controller) you're going to use for easy
         #  autocompletion
-        self.controller: PythonWrapperObjectOfYourInstrument = None
+        self.controller: ThermocoupleController = None
 
         #TODO declare here attributes you want/need to init with a default value
         pass
 
+    
     def commit_settings(self, param: Parameter):
         """Apply the consequences of a change of value in the detector settings
 
@@ -63,10 +58,29 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
             A given parameter (within detector_settings) whose value has been changed by the user
         """
         ## TODO for your custom plugin
-        if param.name() == "a_parameter_you've_added_in_self.params":
-           self.controller.your_method_to_apply_this_param_change()  # when writing your own plugin replace this line
+        if param.name() == "refresh_time":
+           self.apply_settings(*self.build_settings())
+        elif param.name().startswith('tc'):
+            self.apply_settings(*self.build_settings())
+        
+
 #        elif ...
-        ##
+    def get_active_input_channels(self):
+        """Return the list of input channels whose checkbox is enabled."""
+        return [ch for ch in self.input_channels
+                if self.settings.child('thermocouple').child(ch).value()]
+    
+    def build_settings(self):
+        """Build the settings tree"""
+        refresh_time = self.settings.child('refresh_time').value()
+        offsets = [self.settings.child(f'tc{i}_offset').value() for i in range(self.controller.nb_tc)]
+        return refresh_time, offsets
+    
+    def apply_settings(self, refresh_time, offsets):
+        """Apply the settings"""
+        if self.controller.is_measuring:
+            self.controller.stop()
+        self.controller.start(refresh_time, offsets)
 
     def ini_detector(self, controller=None):
         """Detector communication initialization
@@ -84,15 +98,17 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
             False if initialization failed otherwise True
         """
 
-        raise NotImplementedError  # TODO when writing your own plugin remove this line and modify the one below
+        # raise NotImplementedError  # TODO when writing your own plugin remove this line and modify the one below
         if self.is_master:
-            self.controller = PythonWrapperObjectOfYourInstrument()  #instantiate you driver with whatever arguments are needed
-            self.controller.open_communication() # call eventual methods
-            initialized = self.controller.a_method_or_atttribute_to_check_if_init()  # TODO
+            self.controller = ThermocoupleController()  #instantiate you driver with whatever arguments are needed
+            self.controller._try_connect_port(self.settings.child('com_port').value())
+            self.controller.init(port_name=self.settings.child('com_port').value()) # call eventual methods
+            initialized = True
         else:
             self.controller = controller
             initialized = True
 
+        self.make_thermocouple_channels()
         # TODO for your custom plugin (optional) initialize viewers panel with the future type of data
         self.dte_signal_temp.emit(DataToExport(name='myplugin',
                                                data=[DataFromPlugins(name='Mock1',
@@ -102,14 +118,23 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
 
         info = "Whatever info you want to log"
         return info, initialized
+    def make_thermocouple_channels(self):
+        thermo_couple_channels = []
+        for index, tc_config in enumerate(self.controller.tc_configs):
+            param = Parameter(name=f'tc{index}', value=True, type='bool', children=[
+                {'title': 'Min', 'name':  f'tc{index}_min', 'type': 'float', 'value':tc_config.t_min, 'suffix':'°C'},
+                {'title': 'Max', 'name':  f'tc{index}_max', 'type': 'float', 'value':tc_config.t_max, 'suffix':'°C'},
+                {'title': 'Offset', 'name':  f'tc{index}_offset', 'type': 'float', 'value':tc_config.t_offset, 'suffix':'°C'},
+            ])
+            thermo_couple_channels.append(param)
+        self.settings.child('thermocouple').addChildren(thermo_couple_channels)
+        
 
     def close(self):
         """Terminate the communication protocol"""
         ## TODO for your custom plugin
-        raise NotImplementedError  # when writing your own plugin remove this line
-        if self.is_master:
-            #  self.controller.your_method_to_terminate_the_communication()  # when writing your own plugin replace this line
-            ...
+        self.controller.close()
+
 
     def grab_data(self, Naverage=1, **kwargs):
         """Start a grab from the detector
@@ -125,6 +150,12 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
         ## TODO for your custom plugin: you should choose EITHER the synchrone or the asynchrone version following
 
         # synchrone version (blocking function)
+        if not self.controller.is_measuring:
+            self.controller.start()
+
+
+        data = self.controller.read_data()
+
         raise NotImplementedError  # when writing your own plugin remove this line
         data_tot = self.controller.your_method_to_start_a_grab_snap()
         self.dte_signal.emit(DataToExport(name='myplugin',
@@ -147,9 +178,8 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
 
     def stop(self):
         """Stop the current grab hardware wise if necessary"""
-        ## TODO for your custom plugin
-        raise NotImplementedError  # when writing your own plugin remove this line
-        self.controller.your_method_to_stop_acquisition()  # when writing your own plugin replace this line
+        self.controller.stop() 
+        self.is_started = False
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
         ##############################
         return ''

@@ -9,19 +9,19 @@ scanners = false  # true if plugin contains custom scan layout (daq_scan extensi
 package-url = 'https://github.com/PyMoDAQ/pymodaq_plugins_template' #todo modify url by your plugin url
 
 [project]
-name = "pymodaq_plugins_template" #todo modify template by your plugin short name
-description = 'some word about your plugin'
+name = "pymodaq_plugins_thermocouple" #todo modify template by your plugin short name
+description = 'Measuring the temperature of a thermocouple (made by ISMO)'
 dependencies = [
     "pymodaq>=5.0.0",
     #todo: list here all dependencies your package may have
 ]
 
 authors = [
-    {name = "Name Surname", email = "myname@test.fr"},
+    {name = "Constant Schouder", email = "constant.schouder@cnrs.fr"},
     #todo: list here all authors of your plugin
 ]
 maintainers = [
-    {name = "Name Surname", email = "myname@test.fr"},
+    {name = "Constant Schouder", email = "constant.schouder@cnrs.fr"},
     #todo: list here all maintainers of your plugin
 ]
 
@@ -30,7 +30,7 @@ maintainers = [
 dynamic = ["version", "urls", "entry-points"]
 readme = "README.rst"
 license = { file="LICENSE" }
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -38,10 +38,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Human Machine Interfaces",
     "Topic :: Scientific/Engineering :: Visualization",
     "Topic :: Software Development :: Libraries :: Python Modules",
