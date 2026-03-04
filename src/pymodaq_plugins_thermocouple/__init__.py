@@ -10,10 +10,10 @@ except PackageNotFoundError:
     __version__ = '0.0.0dev'
 
 
-from serial.tools.list_ports import comports
-COM_ports = [comport.name for comport in comports()]
-ind = COM_ports.index('COM7')  # Ensure COM5 is in the list of available ports
-COM_ports.insert(0, COM_ports.pop(ind))  # Move COM7 to the front of the list
-config["com_ports"] = COM_ports
+# from serial.tools.list_ports import comports
+# COM_ports = [comport.name for comport in comports()]
+# # ind = COM_ports.index('COM3')  # Ensure COM5 is in the list of available ports
+# # COM_ports.insert(0, COM_ports.pop(ind))  # Move COM7 to the front of the list
+# config["com_ports"] = COM_ports
 
 config.save()

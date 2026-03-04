@@ -8,7 +8,7 @@ import serial.tools.list_ports
 import time
 from dataclasses import dataclass
 from typing import List, Optional
-
+import numpy as np
 
 @dataclass
 class ThermocoupleConfig:
@@ -81,11 +81,11 @@ class ThermocoupleController:
         try:
             # Try to connect to the port
             ser = serial.Serial(port_device, self.BAUD_RATE, timeout=2)
-            # time.sleep(2)  # Wait for Arduino to reset
+            time.sleep(2)  # Wait for Arduino to reset
             
             # Send PC_Init command
             ser.write(b"PC_Init\n")
-            # time.sleep(0.5)
+            time.sleep(0.5)
             
             # Read response
             if ser.in_waiting > 0:
@@ -215,6 +215,8 @@ class ThermocoupleController:
             
             # Parse thermocouple data
             t_tc = self._parse_float_list(parts[1])
+            t_tc = [t if t is not None else np.nan for t in t_tc]
+
             v_tc = self._parse_float_list(parts[2])
             v_total = self._parse_float_list(parts[3])
             t_cj = self._parse_float_list(parts[4])

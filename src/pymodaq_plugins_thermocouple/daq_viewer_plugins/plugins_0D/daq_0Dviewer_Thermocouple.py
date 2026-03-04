@@ -7,9 +7,13 @@ from pymodaq_gui.parameter import Parameter
 from pymodaq.control_modules.viewer_utility_classes import DAQ_Viewer_base, comon_parameters, main
 from pymodaq.utils.data import DataFromPlugins
 from pymodaq_plugins_lakeshore.utils import Config
-config = Config()
+from serial.tools.list_ports import comports
 
-from pymodaq_plugins_thermocouple.hardware.thermocouple import ThermocoupleController
+config = Config()
+com_ports = [port.device for port in comports()]
+from pymodaq_plugins_thermocouple.hardware.thermocouple import ThermocoupleController, ThermocoupleData
+
+
 
 class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
     """ Instrument plugin class for a OD viewer.
@@ -34,9 +38,9 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
 
     """
     params = comon_parameters+[
-        {'title': 'COM', 'name':  'com_port', 'type': 'list', 'limits': config['com_ports'], 'value':config['com_ports'][0]},
+        {'title': 'COM', 'name':  'com_port', 'type': 'list', 'limits': com_ports},
         {'title': 'Refresh time', 'name':  'refresh_time', 'type': 'int', 'value':1000,'suffix':'ms'},
-        {'title': 'Thermocouples', 'name':  'thermocouple', 'type': 'group', 'children':[]},
+        {'title': 'Thermocouples', 'name':  'channels', 'type': 'group', 'children':[]},
         ## TODO for your custom plugin: elements to be added here as dicts in order to control your custom stage
         ]
 
@@ -62,24 +66,34 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
            self.apply_settings(*self.build_settings())
         elif param.name().startswith('tc'):
             self.apply_settings(*self.build_settings())
+        elif "channel" in param.name():
+            self.active_channels = self.get_active_channels()
         
 
 #        elif ...
-    def get_active_input_channels(self):
-        """Return the list of input channels whose checkbox is enabled."""
-        return [ch for ch in self.input_channels
-                if self.settings.child('thermocouple').child(ch).value()]
+    def get_active_channels(self) -> list:
+        """Return the channel list for channels whose checkbox is currently enabled.
+
+        Returns
+        -------
+        list of dict
+            Subset of `self.channels` where the corresponding settings bool is True.
+            Each dict contains at least 'name' and 'enabled', plus any extra keys
+            defined in `channels` (address, unit, …).
+        """
+        return [f'channel_{index}' for index in range(self.controller.nb_tc) if self.settings.child('channels',f'channel_{index}').value()]
+
     
     def build_settings(self):
         """Build the settings tree"""
         refresh_time = self.settings.child('refresh_time').value()
-        offsets = [self.settings.child(f'tc{i}_offset').value() for i in range(self.controller.nb_tc)]
+        offsets = [self.settings.child('channels',f'channel_{i}', f'tc{i}_offset').value() for i in range(self.controller.nb_tc)]
         return refresh_time, offsets
     
     def apply_settings(self, refresh_time, offsets):
         """Apply the settings"""
-        if self.controller.is_measuring:
-            self.controller.stop()
+        # if self.controller.is_measuring:
+        #     self.controller.stop()
         self.controller.start(refresh_time, offsets)
 
     def ini_detector(self, controller=None):
@@ -101,34 +115,36 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
         # raise NotImplementedError  # TODO when writing your own plugin remove this line and modify the one below
         if self.is_master:
             self.controller = ThermocoupleController()  #instantiate you driver with whatever arguments are needed
-            self.controller._try_connect_port(self.settings.child('com_port').value())
-            self.controller.init(port_name=self.settings.child('com_port').value()) # call eventual methods
-            initialized = True
+            initialized = self.controller._try_connect_port(self.settings.child('com_port').value())
         else:
             self.controller = controller
             initialized = True
 
-        self.make_thermocouple_channels()
+        thermo_couple_channels = self.make_thermocouple_channels()
+        # print(thermo_couple_channels)
         # TODO for your custom plugin (optional) initialize viewers panel with the future type of data
-        self.dte_signal_temp.emit(DataToExport(name='myplugin',
-                                               data=[DataFromPlugins(name='Mock1',
-                                                                    data=[np.array([0]), np.array([0])],
-                                                                    dim='Data0D',
-                                                                    labels=['Mock1', 'label2'])]))
-
+        
+        self.active_channels = self.get_active_channels()
+        dte = self._build_dte(
+            data=[np.array([0.0]) for _ in self.active_channels],
+            active_channels = self.active_channels
+        )
+        self.dte_signal_temp.emit(dte)
+             
         info = "Whatever info you want to log"
         return info, initialized
+    
     def make_thermocouple_channels(self):
         thermo_couple_channels = []
         for index, tc_config in enumerate(self.controller.tc_configs):
-            param = Parameter(name=f'tc{index}', value=True, type='bool', children=[
+            param = Parameter(title =f'Channel {index}', name=f'channel_{index}', value=True, type='bool', children=[
                 {'title': 'Min', 'name':  f'tc{index}_min', 'type': 'float', 'value':tc_config.t_min, 'suffix':'°C'},
                 {'title': 'Max', 'name':  f'tc{index}_max', 'type': 'float', 'value':tc_config.t_max, 'suffix':'°C'},
                 {'title': 'Offset', 'name':  f'tc{index}_offset', 'type': 'float', 'value':tc_config.t_offset, 'suffix':'°C'},
             ])
             thermo_couple_channels.append(param)
-        self.settings.child('thermocouple').addChildren(thermo_couple_channels)
-        
+        self.settings.child('channels').addChildren(thermo_couple_channels)
+        return thermo_couple_channels
 
     def close(self):
         """Terminate the communication protocol"""
@@ -136,6 +152,31 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
         self.controller.close()
 
 
+    def _build_dte(self, data: list, active_channels: list) -> DataToExport:
+        """Assemble a DataToExport from a list of scalar arrays and active channel dicts.
+
+        Parameters
+        ----------
+        data: list of np.ndarray
+            One 1-element array per active channel, in the same order.
+        active_channels: list
+            The channel list returned by get_active_channels().
+        """
+        return DataToExport(
+            name='Themocouple',
+            data=[DataFromPlugins(
+                name='Channels',
+                data=data,
+                dim='Data0D',
+                labels=active_channels,
+            )]
+        )
+    
+    def data_to_channel_dict(self, data: ThermocoupleData) -> dict:
+        """Convert a ThermocoupleData object to a dict with channel names as keys"""
+        return {
+            f'channel_{i}': data.t_tc[i] for i in range(self.controller.nb_tc) 
+        }
     def grab_data(self, Naverage=1, **kwargs):
         """Start a grab from the detector
 
@@ -148,26 +189,15 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
             others optionals arguments
         """
         ## TODO for your custom plugin: you should choose EITHER the synchrone or the asynchrone version following
+        active_channels = self.get_active_channels()
+        data_channels = []
 
-        # synchrone version (blocking function)
-        if not self.controller.is_measuring:
-            self.controller.start()
-
-
-        data = self.controller.read_data()
-
-        raise NotImplementedError  # when writing your own plugin remove this line
-        data_tot = self.controller.your_method_to_start_a_grab_snap()
-        self.dte_signal.emit(DataToExport(name='myplugin',
-                                          data=[DataFromPlugins(name='Mock1', data=data_tot,
-                                                                dim='Data0D', labels=['dat0', 'data1'])]))
-        #########################################################
-
-        # asynchrone version (non-blocking function with callback)
-        raise NotImplementedError  # when writing your own plugin remove this line
-        self.controller.your_method_to_start_a_grab_snap(self.callback)  # when writing your own plugin replace this line
-        #########################################################
-
+        data = self.controller.read_data()        
+        if data:        
+            data_dict = self.data_to_channel_dict(data)
+            for ch in self.active_channels:
+                data_channels.append(np.array([data_dict[ch]]))
+            self.dte_signal.emit(self._build_dte(data=data_channels, active_channels=self.active_channels))
 
     def callback(self):
         """optional asynchrone method called when the detector has finished its acquisition of data"""
@@ -179,7 +209,6 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
     def stop(self):
         """Stop the current grab hardware wise if necessary"""
         self.controller.stop() 
-        self.is_started = False
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
         ##############################
         return ''
