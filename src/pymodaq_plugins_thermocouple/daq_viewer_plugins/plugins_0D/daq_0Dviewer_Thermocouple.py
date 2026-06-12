@@ -1,5 +1,7 @@
 import numpy as np
 
+from qtpy import QtCore
+
 from pymodaq_utils.utils import ThreadCommand
 from pymodaq_data.data import DataToExport
 from pymodaq_gui.parameter import Parameter
@@ -39,15 +41,17 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
     """
     params = comon_parameters+[
         {'title': 'COM', 'name':  'com_port', 'type': 'list', 'limits': com_ports},
-        {'title': 'Refresh time', 'name':  'refresh_time', 'type': 'int', 'value':1000,'suffix':'ms'},
+        {'title': 'Refresh time', 'name':  'refresh_time', 'type': 'int', 'value':50,'suffix':'ms'},
         {'title': 'Thermocouples', 'name':  'channels', 'type': 'group', 'children':[]},
         ## TODO for your custom plugin: elements to be added here as dicts in order to control your custom stage
         ]
+    callback_signal = QtCore.Signal() #used to talk with the callback object
 
     def ini_attributes(self):
         #  TODO declare the type of the wrapper (and assign it to self.controller) you're going to use for easy
         #  autocompletion
         self.controller: ThermocoupleController = None
+        self.active_channels = None
 
         #TODO declare here attributes you want/need to init with a default value
         pass
@@ -120,16 +124,18 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
             self.controller = controller
             initialized = True
 
-        thermo_couple_channels = self.make_thermocouple_channels()
+        if not self.settings.child('channels').hasChildren():
+            thermo_couple_channels = self.make_thermocouple_channels()
         # print(thermo_couple_channels)
         # TODO for your custom plugin (optional) initialize viewers panel with the future type of data
-        
+
         self.active_channels = self.get_active_channels()
         dte = self._build_dte(
             data=[np.array([0.0]) for _ in self.active_channels],
             active_channels = self.active_channels
         )
         self.dte_signal_temp.emit(dte)
+        self.controller.start()
              
         info = "Whatever info you want to log"
         return info, initialized
@@ -149,6 +155,7 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
     def close(self):
         """Terminate the communication protocol"""
         ## TODO for your custom plugin
+        # self.settings.child('channels').clearChildren()
         self.controller.close()
 
 
@@ -188,31 +195,42 @@ class DAQ_0DViewer_Thermocouple(DAQ_Viewer_base):
         kwargs: dict
             others optionals arguments
         """
-        ## TODO for your custom plugin: you should choose EITHER the synchrone or the asynchrone version following
-        active_channels = self.get_active_channels()
-        data_channels = []
+        dte = self.get_data()
+        if dte:
+            self.dte_signal.emit(dte)
 
-        data = self.controller.read_data()        
-        if data:        
+
+    def get_data(self):
+        data_channels = []
+        data = self.controller.read_data()
+        if data:            
             data_dict = self.data_to_channel_dict(data)
             for ch in self.active_channels:
                 data_channels.append(np.array([data_dict[ch]]))
-            self.dte_signal.emit(self._build_dte(data=data_channels, active_channels=self.active_channels))
-
+            return self._build_dte(data=data_channels, active_channels=self.active_channels)
     def callback(self):
         """optional asynchrone method called when the detector has finished its acquisition of data"""
-        data_tot = self.controller.your_method_to_get_data_from_buffer()
-        self.dte_signal.emit(DataToExport(name='myplugin',
-                                          data=[DataFromPlugins(name='Mock1', data=data_tot,
-                                                                dim='Data0D', labels=['dat0', 'data1'])]))
+        dte = self.get_data()
+        self.dte_signal.emit(dte)
 
     def stop(self):
         """Stop the current grab hardware wise if necessary"""
-        self.controller.stop() 
+        self.controller.stop()
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
         ##############################
         return ''
 
+class ThermoCoupleCallback(QtCore.QObject):
+
+    data_sig=QtCore.Signal()
+    def __init__(self,wait_fn):
+        super().__init__()
+        self.wait_fn = wait_fn
+
+    def wait_for_acquisition(self):
+        data = self.wait_fn()
+        if data is not None:
+            self.data_sig.emit(data)
 
 if __name__ == '__main__':
     main(__file__)

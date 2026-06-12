@@ -129,7 +129,6 @@ class ThermocoupleController:
         """Stop data acquisition"""
         if self.port_com and self.port_com.is_open:
             self.port_com.write(b"PC_Stop\n")
-            self.is_measuring = False
             print("Acquisition stopped")
 
     def make_command(self, refresh_time: Optional[int] = None,offsets: Optional[List[float]] = None) -> str:
@@ -175,7 +174,6 @@ class ThermocoupleController:
         # Send command
         self.port_com.write(f"{command}\n".encode('utf-8'))
         self.time_start = time.time()
-        self.is_measuring = True
         print(f"Acquisition started: {command}")
         return True
     
